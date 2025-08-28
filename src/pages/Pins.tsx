@@ -1,9 +1,8 @@
-// src/pages/Pins.tsx
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import KakaoMap from '../components/KakaoMap'
 import { createPin, deletePin, getPins } from '../api/pins'
 
-// Vite 기준, CRA/Next.js는 process.env / NEXT_PUBLIC_ 접두사 사용
+// Vite: .env에 VITE_KAKAO_APPKEY=... 지정
 const APPKEY = import.meta.env.VITE_KAKAO_APPKEY as string
 
 export default function Pins() {
@@ -18,12 +17,12 @@ export default function Pins() {
     PRIVATE: false,
   })
 
-  // 체크박스로 선택된 가시성 리스트
+  // 선택된 가시성 리스트
   const visibilityList = useMemo<('PUBLIC' | 'FRIENDS' | 'PRIVATE')[]>(() => {
     return (['PUBLIC', 'FRIENDS', 'PRIVATE'] as const).filter((v) => !!vis[v])
   }, [vis])
 
-  // API 호출
+  // 목록 로드
   const load = useCallback(
     async (overrideBbox?: string) => {
       setLoading(true)
@@ -40,12 +39,10 @@ export default function Pins() {
     [bbox, visibilityList],
   )
 
-  // 초기 로드
   useEffect(() => {
     load()
   }, [])
 
-  // 필터 바뀔 때마다 다시 로드
   useEffect(() => {
     load()
   }, [visibilityList.join(',')])
@@ -73,6 +70,45 @@ export default function Pins() {
     [load],
   )
 
+  // 현 위치에 핀 생성 (페이지 버튼)
+  const handleCreateAtMyLocation = useCallback(async () => {
+    if (!navigator.geolocation) {
+      alert('이 브라우저는 위치 정보를 지원하지 않아요.')
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords
+        const description =
+          window.prompt('현재 위치에 핀을 만들어요. 설명을 입력해 주세요.') || ''
+        if (!description.trim()) return
+
+        try {
+          await createPin({
+            lat: latitude,
+            lng: longitude,
+            description,
+            visibility: 'PUBLIC',
+          })
+          await load()
+        } catch (e) {
+          console.error(e)
+          alert('핀 생성에 실패했어요.')
+        }
+      },
+      (err) => {
+        console.error(err)
+        const msg =
+          err.code === err.PERMISSION_DENIED
+            ? '위치 권한을 허용해 주세요.'
+            : '현재 위치를 가져오지 못했어요.'
+        alert(msg)
+      },
+      { enableHighAccuracy: true, timeout: 8000 },
+    )
+  }, [load])
+
   return (
     <div style={{ padding: 24, maxWidth: 960, margin: '0 auto' }}>
       <h1>
@@ -82,7 +118,7 @@ export default function Pins() {
         </small>
       </h1>
 
-      {/* 필터 UI */}
+      {/* 필터 + 현 위치 버튼 */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '8px 0 12px' }}>
         <label>
           <input type="checkbox" checked={vis.PUBLIC} onChange={() => onToggle('PUBLIC')} /> PUBLIC
@@ -93,9 +129,13 @@ export default function Pins() {
         <label>
           <input type="checkbox" checked={vis.PRIVATE} onChange={() => onToggle('PRIVATE')} /> PRIVATE
         </label>
+
         <button onClick={() => load()} style={{ marginLeft: 'auto' }}>
           적용
         </button>
+
+        {/* 현 위치에 핀 생성 */}
+        <button onClick={handleCreateAtMyLocation}>현 위치에 핀</button>
       </div>
 
       {/* 지도 */}
@@ -104,6 +144,7 @@ export default function Pins() {
         pins={Array.isArray(pins) ? pins : []}
         onBoundsChange={handleBoundsChange}
         onCreatePin={handleCreatePinOnMap}
+        showLocateButton
       />
 
       {/* BBOX 수동 입력 */}

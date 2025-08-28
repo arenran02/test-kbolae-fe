@@ -1,147 +1,212 @@
-// src/components/KakaoMap.tsx
-import { useEffect, useMemo, useRef } from 'react'
-import { useKakaoLoader } from '../hooks/useKakaoLoader'
+import { useEffect, useRef, useState } from 'react'
 
-type Pin = {
-  id: number
+declare global {
+  interface Window {
+    kakao: any
+  }
+}
+
+type PinItem = {
+  id?: number
   lat: number
   lng: number
   description?: string
-  visibility: 'PUBLIC' | 'FRIENDS' | 'PRIVATE'
+  visibility?: 'PUBLIC' | 'FRIENDS' | 'PRIVATE'
 }
 
 type Props = {
   appkey: string
-  pins: Pin[]
-  onBoundsChange?: (bbox: string) => void // "minLng,minLat,maxLng,maxLat"
-  onCreatePin?: (lat: number, lng: number, description: string) => Promise<void> | void
+  pins: PinItem[]
+  onBoundsChange?: (bbox: string) => void
+  /** 지도에서 클릭 시 핀 생성: (lat, lng, description) */
+  onCreatePin?: (lat: number, lng: number, description: string) => Promise<any> | void
+  /** 현재 위치 버튼 표시 여부 */
+  showLocateButton?: boolean
 }
 
-export default function KakaoMap({ appkey, pins, onBoundsChange, onCreatePin }: Props) {
-  const loaded = useKakaoLoader(appkey)
+export default function KakaoMap({
+  appkey,
+  pins,
+  onBoundsChange,
+  onCreatePin,
+  showLocateButton = true,
+}: Props) {
   const mapRef = useRef<HTMLDivElement | null>(null)
-  const mapObj = useRef<any>(null)
+  const mapObjRef = useRef<any>(null)
   const markersRef = useRef<any[]>([])
+  const [sdkReady, setSdkReady] = useState(false)
 
-  // 초기 중심/줌
-  const initialCenter = useMemo(() => ({ lat: 37.5665, lng: 126.9780 }), [])
+  // Kakao Maps SDK 로더
+  useEffect(() => {
+    const hasMaps = !!window.kakao?.maps
+    if (hasMaps) {
+      setSdkReady(true)
+      return
+    }
+
+    const id = 'kakao-map-sdk'
+    const exist = document.getElementById(id) as HTMLScriptElement | null
+    const onScriptLoad = () => {
+      if (window.kakao?.maps) {
+        window.kakao.maps.load(() => setSdkReady(true))
+      } else {
+        console.error('[KakaoMap] kakao.maps not found after script load (check key & domain)')
+      }
+    }
+
+    if (exist) {
+      exist.addEventListener('load', onScriptLoad)
+      return
+    }
+
+    const script = document.createElement('script')
+    script.id = id
+    script.async = true
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${appkey}&autoload=false`
+    script.onload = onScriptLoad
+    script.onerror = () => console.error('[KakaoMap] SDK script failed to load')
+    document.head.appendChild(script)
+  }, [appkey])
 
   // 지도 초기화
   useEffect(() => {
-    if (!loaded || !mapRef.current) return
-    const { kakao } = window
-    const center = new kakao.maps.LatLng(initialCenter.lat, initialCenter.lng)
-    const map = new kakao.maps.Map(mapRef.current, { center, level: 5 }) // level: 작을수록 확대
-    mapObj.current = map
-
-    // bounds 변경 시 BBOX 계산해서 콜백
-    const handleMoveEnd = () => {
-      const b = map.getBounds()
-      // kakao는 (남서, 북동)
-      const sw = b.getSouthWest()
-      const ne = b.getNorthEast()
-      const minLng = sw.getLng()
-      const minLat = sw.getLat()
-      const maxLng = ne.getLng()
-      const maxLat = ne.getLat()
-      onBoundsChange?.(`${minLng},${minLat},${maxLng},${maxLat}`)
+    if (!sdkReady || !mapRef.current) return
+    const maps = window.kakao?.maps
+    if (!maps || typeof maps.LatLng !== 'function' || typeof maps.Map !== 'function') {
+      console.error('[KakaoMap] maps API is not ready (LatLng/Map missing)')
+      return
     }
 
-    kakao.maps.event.addListener(map, 'tilesloaded', handleMoveEnd)
-    kakao.maps.event.addListener(map, 'dragend', handleMoveEnd)
-    kakao.maps.event.addListener(map, 'zoom_changed', handleMoveEnd)
+    const center = new maps.LatLng(37.5665, 126.9780) // 서울시청
+    const map = new maps.Map(mapRef.current, { center, level: 5 })
+    mapObjRef.current = map
 
-    // 지도 클릭 → 핀 생성
+    maps.event.addListener(map, 'idle', () => {
+      if (!onBoundsChange) return
+      const b = map.getBounds()
+      const sw = b.getSouthWest()
+      const ne = b.getNorthEast()
+      const bbox = [sw.getLng(), sw.getLat(), ne.getLng(), ne.getLat()].join(',')
+      onBoundsChange(bbox)
+    })
+
     if (onCreatePin) {
-      kakao.maps.event.addListener(map, 'click', (mouseEvent: any) => {
+      maps.event.addListener(map, 'click', (mouseEvent: any) => {
         const latlng = mouseEvent.latLng
         const lat = latlng.getLat()
         const lng = latlng.getLng()
-        const desc = window.prompt('이 위치에 핀 설명을 입력하세요 (최대 500자):') || ''
-        if (desc.trim().length > 0) {
-          onCreatePin(lat, lng, desc.trim())
-        }
+        const description = window.prompt('이 위치에 핀을 만드시겠어요? (설명 입력)') || ''
+        if (description.trim().length === 0) return
+        Promise.resolve(onCreatePin(lat, lng, description)).catch((e) =>
+          console.error('createPin error', e),
+        )
       })
     }
-
-    return () => {
-      kakao.maps.event.removeListener(map, 'tilesloaded', handleMoveEnd)
-      kakao.maps.event.removeListener(map, 'dragend', handleMoveEnd)
-      kakao.maps.event.removeListener(map, 'zoom_changed', handleMoveEnd)
-    }
-  }, [loaded, initialCenter, onBoundsChange, onCreatePin])
+  }, [sdkReady, onBoundsChange, onCreatePin])
 
   // 마커 렌더링
   useEffect(() => {
-    if (!loaded || !mapObj.current) return
-    const { kakao } = window
-    const map = mapObj.current
+    const map = mapObjRef.current
+    const maps = window.kakao?.maps
+    if (!sdkReady || !map || !maps) return
 
     // 기존 마커 제거
-    markersRef.current.forEach(m => m.setMap(null))
+    markersRef.current.forEach((m) => m.setMap(null))
     markersRef.current = []
 
-    pins.forEach((p) => {
-      const pos = new kakao.maps.LatLng(p.lat, p.lng)
-      const marker = new kakao.maps.Marker({ position: pos })
-      marker.setMap(map)
-
-      // 인포윈도우
-      if (p.description) {
-        const iw = new kakao.maps.InfoWindow({
-          content: `<div style="padding:8px;max-width:220px">${escapeHtml(p.description)}<br/><small>[${p.visibility}] #${p.id}</small></div>`
-        })
-        kakao.maps.event.addListener(marker, 'mouseover', () => iw.open(map, marker))
-        kakao.maps.event.addListener(marker, 'mouseout', () => iw.close())
-        // 클릭 고정 열림 원하면 click 리스너로 토글 구현
-      }
-
+    ;(pins ?? []).forEach((p) => {
+      const pos = new maps.LatLng(p.lat, p.lng)
+      const marker = new maps.Marker({ map, position: pos })
       markersRef.current.push(marker)
-    })
-  }, [loaded, pins])
 
-  // 현재 위치로 이동 버튼
-  const goMyLocation = async () => {
-    if (!mapObj.current) return
+      if (p.description) {
+        const iw = new maps.InfoWindow({
+          content: `<div style="padding:6px 10px">${escapeHtml(p.description)}</div>`,
+        })
+        maps.event.addListener(marker, 'click', () => {
+          iw.open(map, marker)
+          setTimeout(() => {
+            maps.event.addListener(map, 'click', () => iw.close())
+          }, 0)
+        })
+      }
+    })
+  }, [pins, sdkReady])
+
+  // 현재 위치로 이동 + (선택) 핀 생성
+  const handleLocate = () => {
     if (!navigator.geolocation) {
-      alert('이 브라우저는 위치를 지원하지 않습니다.')
+      alert('이 브라우저는 위치 정보를 지원하지 않아요.')
       return
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const { kakao } = window
-        const lat = pos.coords.latitude
-        const lng = pos.coords.longitude
-        const latlng = new kakao.maps.LatLng(lat, lng)
-        mapObj.current.setCenter(latlng)
-        mapObj.current.setLevel(4)
+        const { latitude, longitude } = pos.coords
+        const maps = window.kakao?.maps
+        const map = mapObjRef.current
+        if (!maps || !map) return
+
+        const latlng = new maps.LatLng(latitude, longitude)
+        map.panTo(latlng)
+
+        const marker = new maps.Marker({ map, position: latlng })
+        markersRef.current.push(marker)
+
+        if (onCreatePin) {
+          const ok = confirm('현재 위치에 핀을 생성할까요?')
+          if (ok) {
+            const desc = window.prompt('핀 설명을 입력하세요') || ''
+            if (desc.trim().length > 0) {
+              Promise.resolve(onCreatePin(latitude, longitude, desc)).catch((e) =>
+                console.error('createPin error', e),
+              )
+            }
+          }
+        }
       },
       (err) => {
         console.error(err)
-        alert('현재 위치를 가져올 수 없습니다.')
+        alert(
+          err.code === err.PERMISSION_DENIED
+            ? '위치 권한을 허용해 주세요.'
+            : '현재 위치를 가져오지 못했어요.',
+        )
       },
-      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 10_000 }
+      { enableHighAccuracy: true, timeout: 8000 },
     )
   }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: 480, borderRadius: 12, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,.08)' }}>
-      {!loaded && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}>지도를 불러오는 중…</div>}
+    <div style={{ position: 'relative', width: '100%', height: 500, borderRadius: 8, overflow: 'hidden' }}>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
-      <button
-        onClick={goMyLocation}
-        style={{
-          position: 'absolute', top: 12, right: 12,
-          padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer'
-        }}
-        title="현재 위치로 이동"
-      >
-        현재 위치
-      </button>
+      {showLocateButton && (
+        <button
+          onClick={handleLocate}
+          style={{
+            position: 'absolute',
+            right: 12,
+            bottom: 12,
+            padding: '8px 12px',
+            background: '#111827',
+            color: 'white',
+            border: 0,
+            borderRadius: 8,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+          }}
+        >
+          내 위치로
+        </button>
+      )}
     </div>
   )
 }
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch] as string))
+function escapeHtml(str: string) {
+  return str
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
 }
