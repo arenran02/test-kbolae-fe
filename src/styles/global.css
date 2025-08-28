@@ -1,0 +1,44 @@
+:root{
+  --bg:#0b1020;
+  --surface:#121a33;
+  --muted:#8ea2c8;
+  --text:#e7efff;
+  --brand:#4ea1ff;
+  --brand-strong:#2b7de8;
+  --ring:0 0 0 3px rgba(78,161,255,.35);
+  --radius:16px;
+  --shadow:0 8px 24px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{
+  margin:0;
+  background: radial-gradient(1200px 800px at 70% -10%, #1a244a 0%, #0b1020 60%), var(--bg);
+  color:var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
+}
+a{color:var(--text); text-decoration:none}
+a:hover{opacity:.9}
+.container{max-width:1080px; margin:0 auto; padding:24px}
+.card{
+  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:20px;
+  backdrop-filter: blur(6px);
+}
+.btn{
+  appearance:none; border:0; border-radius:12px; padding:10px 14px;
+  background:var(--brand); color:#fff; font-weight:600; cursor:pointer;
+  transition:transform .08s ease, background .2s ease, box-shadow .2s ease;
+}
+.btn:hover{ background:var(--brand-strong); box-shadow:0 6px 18px rgba(78,161,255,.35) }
+.btn:active{ transform: translateY(1px) }
+.input{
+  width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.02); color:var(--text); outline:none;
+}
+.input:focus{ box-shadow: var(--ring); border-color:transparent }
+.label{ display:block; font-size:.9rem; color:var(--muted); margin-bottom:6px }
+.row{ display:flex; gap:10px; flex-wrap:wrap }
